@@ -1,12 +1,28 @@
 import requests, os, datetime, json
 from bs4 import BeautifulSoup
 from pprint import pformat
-#from collections import Counter
-#import pandas as pd
+import urllib.parse
 
-month = datetime.date.today().strftime("%B")
-day = datetime.date.today().strftime("%d")
-date = month + day
+now = datetime.datetime.now()
+thisMonth = now.month
+thisYear = now.year
+thisDay = now.day
+lastYear = thisYear-1
+
+class BatterData:
+    def __init__(self):
+        self.ab = 0
+        self.h = 0
+        self.x2b = 0
+        self.x3b = 0
+        self.hr = 0
+        self.bb = 0
+        self.hbp = 0
+        self.sb = 0
+        self.cs = 0
+
+    def __repr__(self):
+        return pformat(vars(self), indent=4, width=1)
 
 # TODO: make a generic player both inherit from
 class Batter:
@@ -17,10 +33,14 @@ class Batter:
         self.positions = ''
         self.handedness = ''
         self.cost = ''
-        self.link = ''
+        self.ottoneuPlayerPage = ''
+        self.fangraphsPlayerPage  = ''
+        self.fangraphsSplitsLastYearAPIPage = ''
         self.homeOrAway = ''
         self.league = '' # MLB is empty
         self.opposingPitcher = None
+        self.bvsL = None
+        self.bvsR = None
 
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
@@ -33,16 +53,20 @@ class Pitcher:
         self.team = ''
         self.handedness = ''
         self.cost = ''
-        self.link = ''
+        self.ottoneuPlayerPage = ''
+        self.fangraphsPlayerPage  = ''
         self.homeOrAway = ''
         self.league = '' # MLB is empty
         self.opposingTeam = None
+        self.bvsL = None
+        self.bvsR = None
 
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
 
 
 # grab the link to their page
+# TODO: Get all of the pitchers eventually as well
 def parseLineupPage():
     # TODO: Make the league and team configurable
     data = requests.get('https://ottoneu.fangraphs.com/1212/setlineups?team=8409')
@@ -58,7 +82,7 @@ def parseLineupPage():
             playerInfo = tr.find('td', {'class': 'player-name'})
             playerLink = playerInfo.findAll('a')[0]
             batter.id  = playerLink.attrs.get('id', '')
-            batter.link = 'https://ottoneu.fangraphs.com' + playerLink.attrs.get('href', '')
+            batter.ottoneuPlayerPage = 'https://ottoneu.fangraphs.com' + playerLink.attrs.get('href', '')
             batter.name = playerLink.get_text()
             additionalPlayerInfo = playerInfo.find('span', {'class': 'lineup-player-bio'})
             parts = additionalPlayerInfo.find('span', {'class', 'strong tinytext'}).get_text().split('\xa0')
@@ -85,7 +109,7 @@ def parseLineupPage():
                     pitcher = Pitcher()
                     pitcher.id = pitcherId
                     pitcher.name = pitcherLink.get_text()
-                    pitcher.link = 'https://ottoneu.fangraphs.com' + pitcherLink.attrs.get('href', '')
+                    pitcher.ottoneuPlayerPage = 'https://ottoneu.fangraphs.com' + pitcherLink.attrs.get('href', '')
                     pitcher.handedness = opponentInfo.find('span', {'class': 'tinytext'}).get_text()
 
                     # TODO: grab the league of the pitcher
@@ -108,16 +132,80 @@ def parseLineupPage():
             
             batters[batter.id] = batter
 
-    for batter in batters:
-        print(batters[batter])
+    return (batters, pitchers)
+
+def generateFangraphsSplitsAPIUrl(fangraphsPlayerPage, year):
+    r = requests.get(fangraphsPlayerPage)
+        
+    parsed_url = urllib.parse.urlparse(r.url)
+
+    # Extract player ID from path components
+    player_id = parsed_url.path.split("/")[-2]
+
+    # Build the new URL with API endpoint and parameters
+    fangraphsSplitsLastYearAPIPage = f"https://www.fangraphs.com/api/players/splits?playerid={player_id}&split=&season=" + str(year)
+
+    # Add any existing query parameters from original URL
+    query_string = parsed_url.query
+    if query_string:
+        fangraphsSplitsLastYearAPIPage += f"&{query_string}"
+
+    return fangraphsSplitsLastYearAPIPage
+
+def buildBatterDataObj(row):
+    batterData = BatterData()
+
+    batterData.ab = int(row["AB"])
+    batterData.h = int(row["H"])
+    batterData.x2b = int(row["2B"])
+    batterData.x3b = int(row["3B"])
+    batterData.hr = int(row["HR"])
+    batterData.bb = int(row["BB"])
+    batterData.hbp = int(row["HBP"])
+    batterData.sb = int(row["SB"])
+    batterData.cs = int(row["CS"])
+
+    return batterData
+
+def getBatterData(batters):
+    for batterId in batters:
+        batter = batters[batterId]
+
+        if batter.name != "Termarr Johnson":
+            continue
+        
+        if batter.fangraphsPlayerPage == '':
+            ottoneuPlayerPage = requests.get(batter.ottoneuPlayerPage)
+            soup = BeautifulSoup(ottoneuPlayerPage.text, 'lxml')
+            
+            link = soup.find_all(lambda tag: tag.name == "a" and 'FanGraphs Player Page' == tag.text)
+            batter.fangraphsPlayerPage = link[0].attrs.get('href', '')
+        
+        batter.fangraphsSplitsLastYearAPIPage = generateFangraphsSplitsAPIUrl(batter.fangraphsPlayerPage, lastYear)
+        
+        #TODO: Use the splits tool eventually - it does multiple splits at once
+        r = requests.get(batter.fangraphsSplitsLastYearAPIPage)
+        splitData = r.json()
+        
+        # If players don't have splits on a certain year, just skip
+        if splitData is not None:
+            for row in splitData:
+                if row["Split"] == "vs L":
+                    batter.bvsL = buildBatterDataObj(row)
+                elif row["Split"] == "vs R":
+                    batter.bvsR = buildBatterDataObj(row)
+        else:
+            batter.bvsR = BatterData()
+            batter.bvsL = BatterData()
+
+        print(batter)
 
 
 
-# Go to the hitter pages and find the fangraphs player page (https://www.fangraphs.com/players/isaac-paredes/20036/splits?position=3B&season=0)
-# Go to splits and grab both the vs. L and vs. R. For now, just worry about using the opposing pitcher's hand.
 # Go to the pitcher pages and find the fangraphs player page (https://www.fangraphs.com/players/joe-musgrove/12970/splits?position=P&season=0)
 # Go to splits and grab both the vs. L and vs. R. For now, just worry about using the opposing hitter's hand.
 # Calculate the expected value by averaging pitcher and hitter
 
 
-parseLineupPage()
+(batters, pitchers) = parseLineupPage()
+getBatterData(batters)
