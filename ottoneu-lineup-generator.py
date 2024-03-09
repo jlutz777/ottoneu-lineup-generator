@@ -44,6 +44,7 @@ class Pitcher:
 
 # grab the link to their page
 def parseLineupPage():
+    # TODO: Make the league and team configurable
     data = requests.get('https://ottoneu.fangraphs.com/1212/setlineups?team=8409')
     soup = BeautifulSoup(data.text, 'lxml')
     positionTable = soup.find('table', {'class': 'lineup-table batter'})
