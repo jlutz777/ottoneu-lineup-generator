@@ -1,7 +1,10 @@
+import math
 import requests, os, datetime, json
+import urllib.parse
+
 from bs4 import BeautifulSoup
 from pprint import pformat
-import urllib.parse
+
 
 now = datetime.datetime.now()
 thisMonth = now.month
@@ -20,6 +23,24 @@ class BatterData:
         self.hbp = 0
         self.sb = 0
         self.cs = 0
+        self.so = 0
+
+    def __repr__(self):
+        return pformat(vars(self), indent=4, width=1)
+
+class PitcherData:
+    def __init__(self):
+        self.ab = 0
+        self.tbf = 0
+        self.h = 0
+        self.x2b = 0
+        self.x3b = 0
+        self.hr = 0
+        self.r = 0
+        self.er = 0
+        self.bb = 0
+        self.hbp = 0
+        self.so = 0
 
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
@@ -58,8 +79,8 @@ class Pitcher:
         self.homeOrAway = ''
         self.league = '' # MLB is empty
         self.opposingTeam = None
-        self.bvsL = None
-        self.bvsR = None
+        self.pvsL = None
+        self.pvsR = None
 
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
@@ -164,22 +185,44 @@ def buildBatterDataObj(row):
     batterData.hbp = int(row["HBP"])
     batterData.sb = int(row["SB"])
     batterData.cs = int(row["CS"])
+    batterData.so = int(row["SO"])
 
     return batterData
+
+def buildPitcherDataObj(row):
+    pitcherData = PitcherData()
+
+    # AB does not exist, so generate from H/AVG
+    # Note, this is an estimate and could be off by a bit
+    pitcherData.ab = math.ceil(int(row["H"])/float(row["AVG"]))
+
+    pitcherData.tbf = int(row["TBF"])
+    pitcherData.h = int(row["H"])
+    pitcherData.x2b = int(row["2B"])
+    pitcherData.x3b = int(row["3B"])
+    pitcherData.hr = int(row["HR"])
+    pitcherData.r = int(row["R"])
+    pitcherData.er = int(row["ER"])
+    pitcherData.bb = int(row["BB"])
+    pitcherData.hbp = int(row["HBP"])
+    pitcherData.so = int(row["SO"])
+
+    return pitcherData
+
+def getFangraphsPlayerPageFromOttoneuPlayerPage(ottoPage):
+    ottoneuPlayerPage = requests.get(ottoPage)
+    soup = BeautifulSoup(ottoneuPlayerPage.text, 'lxml')
+    
+    link = soup.find_all(lambda tag: tag.name == "a" and 'FanGraphs Player Page' == tag.text)
+    return link[0].attrs.get('href', '')
+
 
 def getBatterData(batters):
     for batterId in batters:
         batter = batters[batterId]
-
-        if batter.name != "Termarr Johnson":
-            continue
         
         if batter.fangraphsPlayerPage == '':
-            ottoneuPlayerPage = requests.get(batter.ottoneuPlayerPage)
-            soup = BeautifulSoup(ottoneuPlayerPage.text, 'lxml')
-            
-            link = soup.find_all(lambda tag: tag.name == "a" and 'FanGraphs Player Page' == tag.text)
-            batter.fangraphsPlayerPage = link[0].attrs.get('href', '')
+            batter.fangraphsPlayerPage = getFangraphsPlayerPageFromOttoneuPlayerPage(batter.ottoneuPlayerPage)
         
         batter.fangraphsSplitsLastYearAPIPage = generateFangraphsSplitsAPIUrl(batter.fangraphsPlayerPage, lastYear)
         
@@ -198,7 +241,34 @@ def getBatterData(batters):
             batter.bvsR = BatterData()
             batter.bvsL = BatterData()
 
-        print(batter)
+        #print(batter)
+
+def getPitcherData(pitchers):
+    for pitcherId in pitchers:
+        pitcher = pitchers[pitcherId]
+        
+        if pitcher.fangraphsPlayerPage == '':
+            pitcher.fangraphsPlayerPage = getFangraphsPlayerPageFromOttoneuPlayerPage(pitcher.ottoneuPlayerPage)
+        
+        pitcher.fangraphsSplitsLastYearAPIPage = generateFangraphsSplitsAPIUrl(pitcher.fangraphsPlayerPage, lastYear)
+
+        print(pitcher.fangraphsSplitsLastYearAPIPage)
+        
+        r = requests.get(pitcher.fangraphsSplitsLastYearAPIPage)
+        splitData = r.json()
+        
+        # If players don't have splits on a certain year, just skip
+        if splitData is not None:
+            for row in splitData:
+                if row["Split"] == "vs L":
+                    pitcher.pvsL = buildPitcherDataObj(row)
+                elif row["Split"] == "vs R":
+                    pitcher.pvsR = buildPitcherDataObj(row)
+        else:
+            pitcher.bvsR = PitcherData()
+            pitcher.bvsL = PitcherData()
+
+        #print(pitcher)
 
 
 
@@ -209,3 +279,4 @@ def getBatterData(batters):
 
 (batters, pitchers) = parseLineupPage()
 getBatterData(batters)
+getPitcherData(pitchers)
