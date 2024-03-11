@@ -1,3 +1,4 @@
+import argparse
 import math
 import requests, os, datetime, json
 import urllib.parse
@@ -39,6 +40,7 @@ class OttoneuBatterPredictionData:
         self.hbp = 0.0
         self.sb = 0.0
         self.cs = 0.0
+        self.totalPoints = 0.0
 
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
@@ -102,11 +104,9 @@ class Pitcher:
         return pformat(vars(self), indent=4, width=1)
 
 
-# grab the link to their page
 # TODO: Get all of the pitchers eventually as well
-def parseLineupPage():
-    # TODO: Make the league and team configurable
-    data = requests.get('https://ottoneu.fangraphs.com/1212/setlineups?team=8409')
+def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str):
+    data = requests.get(f'https://ottoneu.fangraphs.com/{leagueNumber}/setlineups?team={teamNumber}&date={lineupDate}')
     soup = BeautifulSoup(data.text, 'lxml')
     positionTable = soup.find('table', {'class': 'lineup-table batter'})
     
@@ -292,14 +292,18 @@ def getAverageForData(batterData, pitcherData, averageABs, stat):
     elif getattr(pitcherData, "ab") != 0:
         return averageABs*getattr(pitcherData, stat)/getattr(pitcherData, "ab")
     else:
-        # what do I do here if there's no data?
+        # TODO: what do I do here if there's no data?
         return 0.0
 
 def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: PitcherData):
     calculatedPredictionData: OttoneuBatterPredictionData = OttoneuBatterPredictionData()
 
-    # How do we calculate average abs?
-    calculatedPredictionData.ab = 4.0
+    # TODO: How do we calculate average abs?
+    if batterData.ab == 0 and pitcherData.ab == 0:
+        calculatedPredictionData.ab = 0.0
+    else:
+        calculatedPredictionData.ab = 4.0
+    
     calculatedPredictionData.h = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "h")
     calculatedPredictionData.x2b = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "x2b")
     calculatedPredictionData.x3b = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "x3b")
@@ -326,12 +330,17 @@ def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: Pitcher
 def createBatterPredictions(batter):
     for batterId in batters:
         batter: Batter = batters[batterId]
+
+        bData: BatterData = None
+        pData: PitcherData = None
+
+        #TODO: Determine if a batter's team is not playing or if the batter is not in the lineup
         if batter.opposingPitcher is  None:
-            # Do I just give non-split data or say I can't calculate it yet?
-            pass
+            # No pitcher data yet, so just use the batter
+            # TODO: Get non-split data for this use case
+            bData = BatterData()
+            pData = PitcherData()
         else:
-            bData: BatterData = None
-            pData: PitcherData = None
             if batter.opposingPitcher.handedness == 'R':
                 if batter.handedness == 'R':
                     # pitcher v. R, batter v. R
@@ -350,13 +359,32 @@ def createBatterPredictions(batter):
                     # pitcher v. R, batter v. L
                     bData = batter.bvsL
                     pData = batter.opposingPitcher.pvsR
-            batter.predictionData = calculateBatterPredictionPoints(bData, pData)
 
-            print(batter)
+        batter.predictionData = calculateBatterPredictionPoints(bData, pData)
+
+def printBatterPredictions(batters):
+    for batterId in batters:
+        batter: Batter = batters[batterId]
+        print(f"{batter.name}: {batter.predictionData.totalPoints}")
+
+def getArgs():
+    parser = argparse.ArgumentParser(description='Generate an ottoneu lineup')
+    parser.add_argument('--league', dest='league', type=str, nargs='?', default='1212',
+                        help='the league number in Ottoneu')
+    parser.add_argument('--team', dest='team', type=str, nargs='?', default='8409',
+                        help='the team number in Ottoneu')
+    parser.add_argument('--date', dest='date', type=str, nargs='?', default=f'{thisYear}-{thisMonth}-{thisDay}',
+                        help='the day for the lineup')
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    (batters, pitchers) = parseLineupPage()
+    args = getArgs()
+    leagueNumber = args.league
+    teamNumber = args.team
+    lineupDate = args.date
+    (batters, pitchers) = parseLineupPage(leagueNumber, teamNumber, lineupDate)
     getBatterData(batters)
     getPitcherData(pitchers)
     createBatterPredictions(batters)
+    printBatterPredictions(batters)
