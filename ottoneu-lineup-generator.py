@@ -28,6 +28,21 @@ class BatterData:
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
 
+class OttoneuBatterPredictionData:
+    def __init__(self):
+        self.ab = 0.0
+        self.h = 0.0
+        self.x2b = 0.0
+        self.x3b = 0.0
+        self.hr = 0.0
+        self.bb = 0.0
+        self.hbp = 0.0
+        self.sb = 0.0
+        self.cs = 0.0
+
+    def __repr__(self):
+        return pformat(vars(self), indent=4, width=1)
+
 class PitcherData:
     def __init__(self):
         self.ab = 0
@@ -59,9 +74,10 @@ class Batter:
         self.fangraphsSplitsLastYearAPIPage = ''
         self.homeOrAway = ''
         self.league = '' # MLB is empty
-        self.opposingPitcher = None
-        self.bvsL = None
-        self.bvsR = None
+        self.opposingPitcher: Pitcher = None
+        self.bvsL: BatterData = None
+        self.bvsR: BatterData = None
+        self.predictionData: OttoneuBatterPredictionData = None
 
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
@@ -79,8 +95,8 @@ class Pitcher:
         self.homeOrAway = ''
         self.league = '' # MLB is empty
         self.opposingTeam = None
-        self.pvsL = None
-        self.pvsR = None
+        self.pvsL: PitcherData = None
+        self.pvsR: PitcherData = None
 
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
@@ -252,8 +268,6 @@ def getPitcherData(pitchers):
         
         pitcher.fangraphsSplitsLastYearAPIPage = generateFangraphsSplitsAPIUrl(pitcher.fangraphsPlayerPage, lastYear)
 
-        print(pitcher.fangraphsSplitsLastYearAPIPage)
-        
         r = requests.get(pitcher.fangraphsSplitsLastYearAPIPage)
         splitData = r.json()
         
@@ -270,13 +284,79 @@ def getPitcherData(pitchers):
 
         #print(pitcher)
 
+def getAverageForData(batterData, pitcherData, averageABs, stat):
+    if getattr(batterData, "ab") != 0 and getattr(pitcherData, "ab") != 0:
+        return averageABs*((getattr(batterData, stat)/getattr(batterData, "ab"))+(getattr(pitcherData, stat)/getattr(pitcherData, "ab")))/2.0
+    elif getattr(batterData, "ab") != 0:
+        return averageABs*getattr(batterData, stat)/getattr(batterData, "ab")
+    elif getattr(pitcherData, "ab") != 0:
+        return averageABs*getattr(pitcherData, stat)/getattr(pitcherData, "ab")
+    else:
+        # what do I do here if there's no data?
+        return 0.0
+
+def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: PitcherData):
+    calculatedPredictionData: OttoneuBatterPredictionData = OttoneuBatterPredictionData()
+
+    # How do we calculate average abs?
+    calculatedPredictionData.ab = 4.0
+    calculatedPredictionData.h = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "h")
+    calculatedPredictionData.x2b = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "x2b")
+    calculatedPredictionData.x3b = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "x3b")
+    calculatedPredictionData.hr = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "hr")
+    calculatedPredictionData.bb = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "bb")
+    calculatedPredictionData.hbp = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "hbp")
+    # SB and CS are only available for the hitter
+    calculatedPredictionData.sb = getAverageForData(batterData, PitcherData(), calculatedPredictionData.ab, "sb")
+    calculatedPredictionData.cs = getAverageForData(batterData, PitcherData(), calculatedPredictionData.ab, "cs")
+
+    # Pull this from the ottoneu page at some point
+    calculatedPredictionData.totalPoints = -1.0*calculatedPredictionData.ab
+    calculatedPredictionData.totalPoints += 5.6*calculatedPredictionData.h
+    calculatedPredictionData.totalPoints += 2.9*calculatedPredictionData.x2b
+    calculatedPredictionData.totalPoints += 5.7*calculatedPredictionData.x3b
+    calculatedPredictionData.totalPoints += 9.4*calculatedPredictionData.hr
+    calculatedPredictionData.totalPoints += 3.0*calculatedPredictionData.bb
+    calculatedPredictionData.totalPoints += 3.0*calculatedPredictionData.hbp
+    calculatedPredictionData.totalPoints += 1.9*calculatedPredictionData.sb
+    calculatedPredictionData.totalPoints += -2.8*calculatedPredictionData.cs
+
+    return calculatedPredictionData
+
+def createBatterPredictions(batter):
+    for batterId in batters:
+        batter: Batter = batters[batterId]
+        if batter.opposingPitcher is  None:
+            # Do I just give non-split data or say I can't calculate it yet?
+            pass
+        else:
+            bData: BatterData = None
+            pData: PitcherData = None
+            if batter.opposingPitcher.handedness == 'R':
+                if batter.handedness == 'R':
+                    # pitcher v. R, batter v. R
+                    bData = batter.bvsR
+                    pData = batter.opposingPitcher.pvsR
+                else:   # L or S
+                    # pitcher v. L, batter v. R
+                    bData = batter.bvsR
+                    pData = batter.opposingPitcher.pvsL
+            else:   # pitcher L
+                if batter.handedness == 'L':
+                    # pitcher v. L, batter v. L
+                    bData = batter.bvsL
+                    pData = batter.opposingPitcher.pvsL
+                else:   # R or S
+                    # pitcher v. R, batter v. L
+                    bData = batter.bvsL
+                    pData = batter.opposingPitcher.pvsR
+            batter.predictionData = calculateBatterPredictionPoints(bData, pData)
+
+            print(batter)
 
 
-# Go to the pitcher pages and find the fangraphs player page (https://www.fangraphs.com/players/joe-musgrove/12970/splits?position=P&season=0)
-# Go to splits and grab both the vs. L and vs. R. For now, just worry about using the opposing hitter's hand.
-# Calculate the expected value by averaging pitcher and hitter
-
-
-(batters, pitchers) = parseLineupPage()
-getBatterData(batters)
-getPitcherData(pitchers)
+if __name__ == "__main__":
+    (batters, pitchers) = parseLineupPage()
+    getBatterData(batters)
+    getPitcherData(pitchers)
+    createBatterPredictions(batters)
