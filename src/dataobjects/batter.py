@@ -3,6 +3,7 @@ from .general import Player
 
 class BatterData:
     def __init__(self):
+        self.g = 0
         self.ab = 0
         self.h = 0
         self.x2b = 0
@@ -22,7 +23,9 @@ class Batter(Player):
         super().__init__()
         self.positions = ''
         self.fangraphsSplitsLastYearAPIPage = ''
+        self.fangraphsStatsLastYearAPIPage = ''
         self.opposingPitcher: Player = None
+        self.bOverall: BatterData = None
         self.bvsL: BatterData = None
         self.bvsR: BatterData = None
         self.predictionData: OttoneuBatterPredictionData = None

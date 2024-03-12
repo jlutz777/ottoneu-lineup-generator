@@ -3,8 +3,8 @@ import math
 import requests, datetime
 import urllib.parse
 
-from .dataobjects.batter import Batter, BatterData, OttoneuBatterPredictionData
-from .dataobjects.pitcher import Pitcher, PitcherData
+from dataobjects.batter import Batter, BatterData, OttoneuBatterPredictionData
+from dataobjects.pitcher import Pitcher, PitcherData
 
 from bs4 import BeautifulSoup
 
@@ -59,7 +59,6 @@ def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str):
                     pitcher.ottoneuPlayerPage = 'https://ottoneu.fangraphs.com' + pitcherLink.attrs.get('href', '')
                     pitcher.handedness = opponentInfo.find('span', {'class': 'tinytext'}).get_text()
 
-                    # TODO: grab the league of the pitcher
                     opponentTeam = opponentInfo.find('span', {'class': 'lineup-game-info'}).get_text().split(' ')[0]
                     if opponentTeam.startswith('@'):
                         pitcher.team = opponentTeam[1:]
@@ -81,6 +80,7 @@ def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str):
 
     return (batters, pitchers)
 
+#TODO: These next two functions are really similar, should they be combined?
 def generateFangraphsSplitsAPIUrl(fangraphsPlayerPage, year):
     r = requests.get(fangraphsPlayerPage)
         
@@ -97,15 +97,30 @@ def generateFangraphsSplitsAPIUrl(fangraphsPlayerPage, year):
     if query_string:
         fangraphsSplitsLastYearAPIPage += f"&{query_string}"
     
-    print(fangraphsPlayerPage)
-    print(year)
-    print(fangraphsSplitsLastYearAPIPage)
-
     return fangraphsSplitsLastYearAPIPage
+
+def generateFangraphsStatsAPIUrl(fangraphsPlayerPage, year):
+    r = requests.get(fangraphsPlayerPage)
+        
+    parsed_url = urllib.parse.urlparse(r.url)
+
+    # Extract player ID from path components
+    player_id = parsed_url.path.split("/")[-2]
+
+    # Build the new URL with API endpoint and parameters
+    fangraphsStatsLastYearAPIPage = f"https://www.fangraphs.com/api/players/stats?playerid={player_id}"
+
+    # Add any existing query parameters from original URL
+    query_string = parsed_url.query
+    if query_string:
+        fangraphsStatsLastYearAPIPage += f"&{query_string}"
+    
+    return fangraphsStatsLastYearAPIPage
 
 def buildBatterDataObj(row):
     batterData = BatterData()
 
+    batterData.g = int(row["G"])
     batterData.ab = int(row["AB"])
     batterData.h = int(row["H"])
     batterData.x2b = int(row["2B"])
@@ -155,6 +170,16 @@ def getBatterData(batters):
             batter.fangraphsPlayerPage = getFangraphsPlayerPageFromOttoneuPlayerPage(batter.ottoneuPlayerPage)
         
         batter.fangraphsSplitsLastYearAPIPage = generateFangraphsSplitsAPIUrl(batter.fangraphsPlayerPage, lastYear)
+
+        #TODO: potentially use other data in the player call
+        batter.fangraphsStatsLastYearAPIPage = generateFangraphsStatsAPIUrl(batter.fangraphsPlayerPage, lastYear)
+        r = requests.get(batter.fangraphsStatsLastYearAPIPage)
+        statsData = r.json()
+
+        for dataPoint in statsData["data"]:
+            # Type 0 seems to be regular season
+            if dataPoint.get("aseason", "") == lastYear and dataPoint.get("type", -1) == 0 and dataPoint.get("AbbLevel", "") == "MLB":
+                batter.bOverall = buildBatterDataObj(dataPoint)
         
         #TODO: Use the splits tool eventually - it does multiple splits at once
         r = requests.get(batter.fangraphsSplitsLastYearAPIPage)
@@ -209,14 +234,14 @@ def getAverageForData(batterData, pitcherData, averageABs, stat):
         # TODO: what do I do here if there's no data?
         return 0.0
 
-def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: PitcherData):
+def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: PitcherData, overallBatterData: BatterData):
     calculatedPredictionData: OttoneuBatterPredictionData = OttoneuBatterPredictionData()
 
-    # TODO: How do we calculate average abs?
+    #TODO: If there are no abs, then use either minor league stats or projections
     if batterData.ab == 0 and pitcherData.ab == 0:
         calculatedPredictionData.ab = 0.0
     else:
-        calculatedPredictionData.ab = 4.0
+        calculatedPredictionData.ab = overallBatterData.ab/overallBatterData.g
     
     calculatedPredictionData.h = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "h")
     calculatedPredictionData.x2b = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "x2b")
@@ -248,8 +273,12 @@ def createBatterPredictions(batter):
         bData: BatterData = None
         pData: PitcherData = None
 
+        # Not in the majors
+        if batter.league != "":
+            bData = BatterData()
+            pData = PitcherData()
         #TODO: Determine if a batter's team is not playing or if the batter is not in the lineup
-        if batter.opposingPitcher is  None:
+        elif batter.opposingPitcher is None:
             # No pitcher data yet, so just use the batter
             # TODO: Get non-split data for this use case
             bData = BatterData()
@@ -274,7 +303,7 @@ def createBatterPredictions(batter):
                     bData = batter.bvsL
                     pData = batter.opposingPitcher.pvsR
 
-        batter.predictionData = calculateBatterPredictionPoints(bData, pData)
+        batter.predictionData = calculateBatterPredictionPoints(bData, pData, batter.bOverall)
 
 def printBatterPredictions(batters):
     for batterId in batters:

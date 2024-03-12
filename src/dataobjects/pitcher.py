@@ -23,5 +23,6 @@ class Pitcher(Player):
     def __init__(self):
         super().__init__()
         self.opposingTeam = None
+        self.pOverall: PitcherData = None
         self.pvsL: PitcherData = None
         self.pvsR: PitcherData = None
