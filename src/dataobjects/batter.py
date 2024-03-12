@@ -17,7 +17,6 @@ class BatterData:
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
 
-# TODO: make a generic player both inherit from
 class Batter(Player):
     def __init__(self):
         super().__init__()

@@ -3,11 +3,10 @@ import math
 import requests, datetime
 import urllib.parse
 
-from src.dataobjects.batter import Batter, BatterData, OttoneuBatterPredictionData
-from src.dataobjects.pitcher import Pitcher, PitcherData
+from .dataobjects.batter import Batter, BatterData, OttoneuBatterPredictionData
+from .dataobjects.pitcher import Pitcher, PitcherData
 
 from bs4 import BeautifulSoup
-from pprint import pformat
 
 now = datetime.datetime.now()
 thisMonth = now.month
@@ -97,6 +96,10 @@ def generateFangraphsSplitsAPIUrl(fangraphsPlayerPage, year):
     query_string = parsed_url.query
     if query_string:
         fangraphsSplitsLastYearAPIPage += f"&{query_string}"
+    
+    print(fangraphsPlayerPage)
+    print(year)
+    print(fangraphsSplitsLastYearAPIPage)
 
     return fangraphsSplitsLastYearAPIPage
 
