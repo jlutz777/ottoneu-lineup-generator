@@ -1,108 +1,19 @@
 import argparse
 import math
-import requests, os, datetime, json
+import requests, datetime
 import urllib.parse
+
+from src.dataobjects.batter import Batter, BatterData, OttoneuBatterPredictionData
+from src.dataobjects.pitcher import Pitcher, PitcherData
 
 from bs4 import BeautifulSoup
 from pprint import pformat
-
 
 now = datetime.datetime.now()
 thisMonth = now.month
 thisYear = now.year
 thisDay = now.day
 lastYear = thisYear-1
-
-class BatterData:
-    def __init__(self):
-        self.ab = 0
-        self.h = 0
-        self.x2b = 0
-        self.x3b = 0
-        self.hr = 0
-        self.bb = 0
-        self.hbp = 0
-        self.sb = 0
-        self.cs = 0
-        self.so = 0
-
-    def __repr__(self):
-        return pformat(vars(self), indent=4, width=1)
-
-class OttoneuBatterPredictionData:
-    def __init__(self):
-        self.ab = 0.0
-        self.h = 0.0
-        self.x2b = 0.0
-        self.x3b = 0.0
-        self.hr = 0.0
-        self.bb = 0.0
-        self.hbp = 0.0
-        self.sb = 0.0
-        self.cs = 0.0
-        self.totalPoints = 0.0
-
-    def __repr__(self):
-        return pformat(vars(self), indent=4, width=1)
-
-class PitcherData:
-    def __init__(self):
-        self.ab = 0
-        self.tbf = 0
-        self.h = 0
-        self.x2b = 0
-        self.x3b = 0
-        self.hr = 0
-        self.r = 0
-        self.er = 0
-        self.bb = 0
-        self.hbp = 0
-        self.so = 0
-
-    def __repr__(self):
-        return pformat(vars(self), indent=4, width=1)
-
-# TODO: make a generic player both inherit from
-class Batter:
-    def __init__(self):
-        self.id = ''
-        self.name = ''
-        self.team = ''
-        self.positions = ''
-        self.handedness = ''
-        self.cost = ''
-        self.ottoneuPlayerPage = ''
-        self.fangraphsPlayerPage  = ''
-        self.fangraphsSplitsLastYearAPIPage = ''
-        self.homeOrAway = ''
-        self.league = '' # MLB is empty
-        self.opposingPitcher: Pitcher = None
-        self.bvsL: BatterData = None
-        self.bvsR: BatterData = None
-        self.predictionData: OttoneuBatterPredictionData = None
-
-    def __repr__(self):
-        return pformat(vars(self), indent=4, width=1)
-
-
-class Pitcher:
-    def __init__(self):
-        self.id = ''
-        self.name = ''
-        self.team = ''
-        self.handedness = ''
-        self.cost = ''
-        self.ottoneuPlayerPage = ''
-        self.fangraphsPlayerPage  = ''
-        self.homeOrAway = ''
-        self.league = '' # MLB is empty
-        self.opposingTeam = None
-        self.pvsL: PitcherData = None
-        self.pvsR: PitcherData = None
-
-    def __repr__(self):
-        return pformat(vars(self), indent=4, width=1)
-
 
 # TODO: Get all of the pitchers eventually as well
 def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str):
@@ -380,10 +291,7 @@ def getArgs():
 
 if __name__ == "__main__":
     args = getArgs()
-    leagueNumber = args.league
-    teamNumber = args.team
-    lineupDate = args.date
-    (batters, pitchers) = parseLineupPage(leagueNumber, teamNumber, lineupDate)
+    (batters, pitchers) = parseLineupPage(args.league, args.team, args.date)
     getBatterData(batters)
     getPitcherData(pitchers)
     createBatterPredictions(batters)
