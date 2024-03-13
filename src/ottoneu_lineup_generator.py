@@ -3,6 +3,7 @@ import math
 import requests, datetime
 import urllib.parse
 
+from dataobjects.general import PredictionType, ProjectionType
 from dataobjects.batter import Batter, BatterData, OttoneuBatterPredictionData
 from dataobjects.pitcher import Pitcher, PitcherData
 
@@ -143,8 +144,8 @@ def buildPitcherDataObj(row):
 
     pitcherData.tbf = int(row["TBF"])
     pitcherData.h = int(row["H"])
-    pitcherData.x2b = int(row["2B"])
-    pitcherData.x3b = int(row["3B"])
+    pitcherData.x2b = int(row.get("2B", "0"))
+    pitcherData.x3b = int(row.get("3B", "0"))
     pitcherData.hr = int(row["HR"])
     pitcherData.r = int(row["R"])
     pitcherData.er = int(row["ER"])
@@ -162,27 +163,26 @@ def getFangraphsPlayerPageFromOttoneuPlayerPage(ottoPage):
     return link[0].attrs.get('href', '')
 
 
-def getBatterData(batters):
+def getBatterData(batters, predictionYear):
     for batterId in batters:
-        batter = batters[batterId]
+        batter: Batter = batters[batterId]
         
         if batter.fangraphsPlayerPage == '':
             batter.fangraphsPlayerPage = getFangraphsPlayerPageFromOttoneuPlayerPage(batter.ottoneuPlayerPage)
         
-        batter.fangraphsSplitsLastYearAPIPage = generateFangraphsSplitsAPIUrl(batter.fangraphsPlayerPage, lastYear)
+        batter.fangraphsSplitsYearAPIPage = generateFangraphsSplitsAPIUrl(batter.fangraphsPlayerPage, predictionYear)
 
-        #TODO: potentially use other data in the player call
-        batter.fangraphsStatsLastYearAPIPage = generateFangraphsStatsAPIUrl(batter.fangraphsPlayerPage, lastYear)
-        r = requests.get(batter.fangraphsStatsLastYearAPIPage)
+        # TODO: potentially use other data in the player call
+        batter.fangraphsStatsYearAPIPage = generateFangraphsStatsAPIUrl(batter.fangraphsPlayerPage, predictionYear)
+        r = requests.get(batter.fangraphsStatsYearAPIPage)
         statsData = r.json()
 
         for dataPoint in statsData["data"]:
             # Type 0 seems to be regular season
-            if dataPoint.get("aseason", "") == lastYear and dataPoint.get("type", -1) == 0 and dataPoint.get("AbbLevel", "") == "MLB":
+            if dataPoint.get("aseason", "") == predictionYear and dataPoint.get("type", -1) == 0 and dataPoint.get("AbbLevel", "") == "MLB":
                 batter.bOverall = buildBatterDataObj(dataPoint)
         
-        #TODO: Use the splits tool eventually - it does multiple splits at once
-        r = requests.get(batter.fangraphsSplitsLastYearAPIPage)
+        r = requests.get(batter.fangraphsSplitsYearAPIPage)
         splitData = r.json()
         
         # If players don't have splits on a certain year, just skip
@@ -198,16 +198,29 @@ def getBatterData(batters):
 
         #print(batter)
 
-def getPitcherData(pitchers):
+def getPitcherData(pitchers: dict[str, Pitcher], predictionYear: str):
     for pitcherId in pitchers:
-        pitcher = pitchers[pitcherId]
+        pitcher: Pitcher = pitchers[pitcherId]
         
         if pitcher.fangraphsPlayerPage == '':
             pitcher.fangraphsPlayerPage = getFangraphsPlayerPageFromOttoneuPlayerPage(pitcher.ottoneuPlayerPage)
         
-        pitcher.fangraphsSplitsLastYearAPIPage = generateFangraphsSplitsAPIUrl(pitcher.fangraphsPlayerPage, lastYear)
+        pitcher.fangraphsSplitsYearAPIPage = generateFangraphsSplitsAPIUrl(pitcher.fangraphsPlayerPage, predictionYear)
 
-        r = requests.get(pitcher.fangraphsSplitsLastYearAPIPage)
+        # TODO: potentially use other data in the player call
+        pitcher.fangraphsStatsYearAPIPage = generateFangraphsStatsAPIUrl(pitcher.fangraphsPlayerPage, predictionYear)
+        r = requests.get(pitcher.fangraphsStatsYearAPIPage)
+        statsData = r.json()
+
+        for dataPoint in statsData["data"]:
+            # Type 0 seems to be regular season
+            if dataPoint.get("aseason", "") == predictionYear and dataPoint.get("type", -1) == 0 and dataPoint.get("AbbLevel", "") == "MLB":
+                pitcher.pOverall = buildPitcherDataObj(dataPoint)
+        
+        if pitcher.pOverall is None:
+            pitcher.pOverall = PitcherData()
+
+        r = requests.get(pitcher.fangraphsSplitsYearAPIPage)
         splitData = r.json()
         
         # If players don't have splits on a certain year, just skip
@@ -217,9 +230,15 @@ def getPitcherData(pitchers):
                     pitcher.pvsL = buildPitcherDataObj(row)
                 elif row["Split"] == "vs R":
                     pitcher.pvsR = buildPitcherDataObj(row)
-        else:
-            pitcher.bvsR = PitcherData()
-            pitcher.bvsL = PitcherData()
+
+        if pitcher.pvsR is None:
+            pitcher.pvsR = PitcherData()
+        if pitcher.pvsL is None:
+            pitcher.pvsL = PitcherData()
+        
+        # Overall data doesn't have 2B and 3B, so hack it in
+        pitcher.pOverall.x2b = pitcher.pvsL.x2b + pitcher.pvsR.x2b
+        pitcher.pOverall.x3b = pitcher.pvsL.x3b + pitcher.pvsR.x3b
 
         #print(pitcher)
 
@@ -266,24 +285,43 @@ def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: Pitcher
 
     return calculatedPredictionData
 
-def createBatterPredictions(batter):
+def createBatterPredictions(batters: dict[str, Batter], preferredPredictionType: PredictionType, predictionYear: str, projectionType: ProjectionType):
     for batterId in batters:
         batter: Batter = batters[batterId]
+
+        predictionType: PredictionType = PredictionType.Empty
 
         bData: BatterData = None
         pData: PitcherData = None
 
-        # Not in the majors
-        if batter.league != "":
-            bData = BatterData()
-            pData = PitcherData()
-        #TODO: Determine if a batter's team is not playing or if the batter is not in the lineup
-        elif batter.opposingPitcher is None:
-            # No pitcher data yet, so just use the batter
-            # TODO: Get non-split data for this use case
-            bData = BatterData()
-            pData = PitcherData()
+        possiblePredictionType = PredictionType.Empty
+        if batter.league == "":
+            if batter.opposingPitcher is not None:
+                possiblePredictionType = PredictionType.MajorsSplit
+            else:
+                possiblePredictionType = PredictionType.MajorsOverall
         else:
+            possiblePredictionType = PredictionType.Projection
+        
+        if possiblePredictionType <= preferredPredictionType:
+            predictionType = possiblePredictionType
+        else:
+            predictionType = preferredPredictionType
+        
+        # TODO: Determine if a batter's team is not playing or if the batter is not in the lineup, give them zero
+        if predictionType == PredictionType.Projection or predictionType == PredictionType.Minors:
+            # TODO: Replace with projection or minor league stats
+            bData = BatterData()
+            pData = PitcherData()
+        elif predictionType == PredictionType.MajorsOverall:
+            predictionType = PredictionType.MajorsOverall
+            bData = batter.bOverall
+            if batter.opposingPitcher is None:
+                pData = PitcherData()
+            else:
+                pData = batter.opposingPitcher.pOverall
+        else: # MajorsSplits
+            predictionType = PredictionType.MajorsSplit
             if batter.opposingPitcher.handedness == 'R':
                 if batter.handedness == 'R':
                     # pitcher v. R, batter v. R
@@ -318,13 +356,33 @@ def getArgs():
                         help='the team number in Ottoneu')
     parser.add_argument('--date', dest='date', type=str, nargs='?', default=f'{thisYear}-{thisMonth}-{thisDay}',
                         help='the day for the lineup')
-    return parser.parse_args()
+    parser.add_argument('--preferred-prediction-type', dest='preferredPredictionType', type=str, nargs='?', default='MajorsSplit',
+                        help='the type of prediction to use if available')
+    parser.add_argument('--prediction-year', dest='predictionYear', type=str, nargs='?', default='lastYear',
+                        help='the year to use if available')
+    parser.add_argument('--projection-type', dest='projectionType', type=str, nargs='?', default='Zips',
+                        help='if a projection is used, use this specific type')
+    args = parser.parse_args()
+
+    # Allow special strings for lastYear and thisYear
+    if args.predictionYear == "lastYear":
+        args.predictionYear = lastYear
+    elif args.predictionYear == "thisYear":
+        args.predictionYear = thisYear
+    else:
+        args.predictionYear = int(args.predictionYear)
+    
+    # Parse the prediction type and projection type
+    args.preferredPredictionType = PredictionType[args.preferredPredictionType]
+    args.projectionType = ProjectionType[args.projectionType]
+
+    return args
 
 
 if __name__ == "__main__":
     args = getArgs()
     (batters, pitchers) = parseLineupPage(args.league, args.team, args.date)
-    getBatterData(batters)
-    getPitcherData(pitchers)
-    createBatterPredictions(batters)
+    getBatterData(batters, args.predictionYear)
+    getPitcherData(pitchers, args.predictionYear)
+    createBatterPredictions(batters, args.preferredPredictionType, args.predictionYear, args.projectionType)
     printBatterPredictions(batters)

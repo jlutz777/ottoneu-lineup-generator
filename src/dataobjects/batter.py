@@ -1,5 +1,5 @@
 from pprint import pformat
-from .general import Player
+from .general import Player, PredictionType, ProjectionType
 
 class BatterData:
     def __init__(self):
@@ -22,8 +22,6 @@ class Batter(Player):
     def __init__(self):
         super().__init__()
         self.positions = ''
-        self.fangraphsSplitsLastYearAPIPage = ''
-        self.fangraphsStatsLastYearAPIPage = ''
         self.opposingPitcher: Player = None
         self.bOverall: BatterData = None
         self.bvsL: BatterData = None
@@ -32,6 +30,8 @@ class Batter(Player):
 
 class OttoneuBatterPredictionData:
     def __init__(self):
+        self.predictionType: PredictionType = PredictionType.Empty
+        self.projectionType: ProjectionType = ProjectionType.Empty
         self.ab = 0.0
         self.h = 0.0
         self.x2b = 0.0
