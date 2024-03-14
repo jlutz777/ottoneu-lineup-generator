@@ -108,8 +108,8 @@ def generateFangraphsStatsAPIUrl(fangraphsPlayerPage):
     return generateFangraphsAPIUrl(fangraphsPlayerPage, apiTemplate)
 
 
-def buildBatterDataObj(row):
-    batterData = BatterData()
+def buildBatterDataObj(row, predictionType: PredictionType, projectionType: ProjectionType):
+    batterData = BatterData(predictionType, projectionType)
 
     batterData.g = int(row["G"])
     batterData.ab = int(row["AB"])
@@ -125,8 +125,8 @@ def buildBatterDataObj(row):
 
     return batterData
 
-def buildPitcherDataObj(row):
-    pitcherData = PitcherData()
+def buildPitcherDataObj(row, predictionType: PredictionType, projectionType: ProjectionType):
+    pitcherData = PitcherData(predictionType, projectionType)
 
     # AB does not exist, so generate from H/AVG
     # Note, this is an estimate and could be off by a bit
@@ -170,7 +170,7 @@ def getBatterData(batters, predictionYear):
         for dataPoint in statsData["data"]:
             # Type 0 seems to be regular season
             if dataPoint.get("aseason", "") == predictionYear and dataPoint.get("type", -1) == 0 and dataPoint.get("AbbLevel", "") == "MLB":
-                batter.bOverall = buildBatterDataObj(dataPoint)
+                batter.bOverall = buildBatterDataObj(dataPoint, PredictionType.MajorsOverall, ProjectionType.Empty)
         
         r = requests.get(batter.fangraphsSplitsYearAPIPage)
         splitData = r.json()
@@ -179,12 +179,14 @@ def getBatterData(batters, predictionYear):
         if splitData is not None:
             for row in splitData:
                 if row["Split"] == "vs L":
-                    batter.bvsL = buildBatterDataObj(row)
+                    batter.bvsL = buildBatterDataObj(row, PredictionType.MajorsSplit, ProjectionType.Empty)
                 elif row["Split"] == "vs R":
-                    batter.bvsR = buildBatterDataObj(row)
-        else:
-            batter.bvsR = BatterData()
-            batter.bvsL = BatterData()
+                    batter.bvsR = buildBatterDataObj(row, PredictionType.MajorsSplit, ProjectionType.Empty)
+        
+        if batter.bvsR is None:
+            batter.bvsR = batter.bOverall
+        if batter.bvsL is None:
+            batter.bvsL = batter.bOverall
 
         #break # temp so we don't go through every batter
 
@@ -205,10 +207,10 @@ def getPitcherData(pitchers: dict[str, Pitcher], predictionYear: str):
         for dataPoint in statsData["data"]:
             # Type 0 seems to be regular season
             if dataPoint.get("aseason", "") == predictionYear and dataPoint.get("type", -1) == 0 and dataPoint.get("AbbLevel", "") == "MLB":
-                pitcher.pOverall = buildPitcherDataObj(dataPoint)
+                pitcher.pOverall = buildPitcherDataObj(dataPoint, PredictionType.MajorsOverall, ProjectionType.Empty)
         
         if pitcher.pOverall is None:
-            pitcher.pOverall = PitcherData()
+            pitcher.pOverall = PitcherData(PredictionType.Empty, ProjectionType.Empty)
 
         r = requests.get(pitcher.fangraphsSplitsYearAPIPage)
         splitData = r.json()
@@ -217,14 +219,14 @@ def getPitcherData(pitchers: dict[str, Pitcher], predictionYear: str):
         if splitData is not None:
             for row in splitData:
                 if row["Split"] == "vs L":
-                    pitcher.pvsL = buildPitcherDataObj(row)
+                    pitcher.pvsL = buildPitcherDataObj(row, PredictionType.MajorsSplit, ProjectionType.Empty)
                 elif row["Split"] == "vs R":
-                    pitcher.pvsR = buildPitcherDataObj(row)
+                    pitcher.pvsR = buildPitcherDataObj(row, PredictionType.MajorsSplit, ProjectionType.Empty)
 
         if pitcher.pvsR is None:
-            pitcher.pvsR = PitcherData()
+            pitcher.pvsR = pitcher.pOverall
         if pitcher.pvsL is None:
-            pitcher.pvsL = PitcherData()
+            pitcher.pvsL = pitcher.pOverall
         
         # Overall data doesn't have 2B and 3B, so hack it in
         pitcher.pOverall.x2b = pitcher.pvsL.x2b + pitcher.pvsR.x2b
@@ -241,7 +243,7 @@ def getAverageForData(batterData, pitcherData, averageABs, stat):
         # TODO: what do I do here if there's no data?
         return 0.0
 
-def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: PitcherData, overallBatterData: BatterData, predictionType: PredictionType):
+def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: PitcherData, overallBatterData: BatterData):
     calculatedPredictionData: OttoneuBatterPredictionData = OttoneuBatterPredictionData()
 
     #TODO: If there are no abs, then use either minor league stats or projections
@@ -250,7 +252,8 @@ def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: Pitcher
     else:
         calculatedPredictionData.ab = overallBatterData.ab/overallBatterData.g
     
-    calculatedPredictionData.predictionType = predictionType
+    calculatedPredictionData.batterPredictionType = batterData.predictionType
+    calculatedPredictionData.pitcherPredictionType = pitcherData.predictionType
     
     calculatedPredictionData.h = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "h")
     calculatedPredictionData.x2b = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "x2b")
@@ -259,8 +262,8 @@ def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: Pitcher
     calculatedPredictionData.bb = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "bb")
     calculatedPredictionData.hbp = getAverageForData(batterData, pitcherData, calculatedPredictionData.ab, "hbp")
     # SB and CS are only available for the hitter
-    calculatedPredictionData.sb = getAverageForData(batterData, PitcherData(), calculatedPredictionData.ab, "sb")
-    calculatedPredictionData.cs = getAverageForData(batterData, PitcherData(), calculatedPredictionData.ab, "cs")
+    calculatedPredictionData.sb = getAverageForData(batterData, PitcherData(PredictionType.Empty, ProjectionType.Empty), calculatedPredictionData.ab, "sb")
+    calculatedPredictionData.cs = getAverageForData(batterData, PitcherData(PredictionType.Empty, ProjectionType.Empty), calculatedPredictionData.ab, "cs")
 
     # Pull this from the ottoneu page at some point
     calculatedPredictionData.totalPoints = -1.0*calculatedPredictionData.ab
@@ -274,6 +277,13 @@ def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: Pitcher
     calculatedPredictionData.totalPoints += -2.8*calculatedPredictionData.cs
 
     return calculatedPredictionData
+
+def chooseBatterPrediction(options):
+    for option in options:
+        if option is not None and getattr(option, "ab") > 0:
+            return option
+    return BatterData(PredictionType.Empty, ProjectionType.Empty)
+    
 
 def createBatterPredictions(batters: dict[str, Batter], preferredPredictionType: PredictionType, predictionYear: str, projectionType: ProjectionType):
     for batterId in batters:
@@ -303,44 +313,44 @@ def createBatterPredictions(batters: dict[str, Batter], preferredPredictionType:
         # TODO: Determine if a batter's team is not playing or if the batter is not in the lineup, give them zero
         if predictionType == PredictionType.Projection or predictionType == PredictionType.Minors:
             # TODO: Replace with projection or minor league stats
-            bData = BatterData()
-            pData = PitcherData()
+            bData = BatterData(PredictionType.Empty, ProjectionType.Empty)
+            pData = PitcherData(PredictionType.Empty, ProjectionType.Empty)
         elif predictionType == PredictionType.MajorsOverall:
             bData = batter.bOverall
             if batter.opposingPitcher is None:
-                pData = PitcherData()
+                pData = PitcherData(PredictionType.Empty, ProjectionType.Empty)
             else:
                 pData = batter.opposingPitcher.pOverall
         elif predictionType == PredictionType.MajorsSplit:
             if batter.opposingPitcher.handedness == 'R':
                 if batter.handedness == 'R':
                     # pitcher v. R, batter v. R
-                    bData = batter.bvsR
+                    bData = chooseBatterPrediction([batter.bvsR, batter.bOverall]) # add projection and minors when I have them
                     pData = batter.opposingPitcher.pvsR
                 else:   # L or S
                     # pitcher v. L, batter v. R
-                    bData = batter.bvsR
+                    bData = chooseBatterPrediction([batter.bvsR, batter.bOverall]) # add projection and minors when I have them
                     pData = batter.opposingPitcher.pvsL
             else:   # pitcher L
                 if batter.handedness == 'L':
                     # pitcher v. L, batter v. L
-                    bData = batter.bvsL
+                    bData = chooseBatterPrediction([batter.bvsL, batter.bOverall]) # add projection and minors when I have them
                     pData = batter.opposingPitcher.pvsL
                 else:   # R or S
                     # pitcher v. R, batter v. L
-                    bData = batter.bvsL
+                    bData = chooseBatterPrediction([batter.bvsL, batter.bOverall]) # add projection and minors when I have them
                     pData = batter.opposingPitcher.pvsR
         else:
             raise Exception("Invalid prediction type?")
-
-        batter.predictionData = calculateBatterPredictionPoints(bData, pData, batter.bOverall, predictionType)
+        
+        batter.predictionData = calculateBatterPredictionPoints(bData, pData, batter.bOverall)
 
         #break # temp so we don't go through every batter
 
 def printBatterPredictions(batters):
     for batterId in batters:
         batter: Batter = batters[batterId]
-        print(f"{batter.name}: {batter.predictionData.totalPoints}, {batter.predictionData.predictionType}")
+        print(f"{batter.name}: {batter.predictionData.totalPoints}, {batter.predictionData.batterPredictionType}, {batter.predictionData.pitcherPredictionType}")
 
 def getArgs():
     parser = argparse.ArgumentParser(description='Generate an ottoneu lineup')

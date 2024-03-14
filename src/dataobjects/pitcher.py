@@ -1,8 +1,8 @@
 from pprint import pformat
-from .general import Player
+from .general import Player, PredictionType, ProjectionType
 
 class PitcherData:
-    def __init__(self):
+    def __init__(self, predictionType: PredictionType, projectionType: ProjectionType):
         self.ab = 0
         self.tbf = 0
         self.h = 0
@@ -14,6 +14,9 @@ class PitcherData:
         self.bb = 0
         self.hbp = 0
         self.so = 0
+
+        self.predictionType = predictionType
+        self.projectionType = projectionType
 
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
