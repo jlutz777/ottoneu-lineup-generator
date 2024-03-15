@@ -289,8 +289,6 @@ def createBatterPredictions(batters: dict[str, Batter], preferredPredictionType:
     for batterId in batters:
         batter: Batter = batters[batterId]
 
-        print(f'Name: {batter.name}')
-
         predictionType: PredictionType = PredictionType.Empty
 
         bData: BatterData = None
