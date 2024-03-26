@@ -16,7 +16,7 @@ thisDay = now.day
 lastYear = thisYear-1
 
 # TODO: Get all of the pitchers eventually as well
-def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str):
+def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str) -> tuple[dict[str, BatterData], dict[str, PitcherData]]:
     data = requests.get(f'https://ottoneu.fangraphs.com/{leagueNumber}/setlineups?team={teamNumber}&date={lineupDate}')
     soup = BeautifulSoup(data.text, 'lxml')
     positionTable = soup.find('table', {'class': 'lineup-table batter'})
@@ -48,7 +48,8 @@ def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str):
             batter.handedness = handedness
 
             opponentInfo = playerInfo.find('span', {'class': 'lineup-opponent-info'})
-            pitcherLink = opponentInfo.find('a')
+            # If the game is finished, the link is on the game score instead of the profile page, so don't recurse
+            pitcherLink = opponentInfo.find('a', recursive=False)
 
             if pitcherLink is not None:
                 pitcherId  = 'player_' + pitcherLink.attrs.get('href', '').split('/')[3]
@@ -81,7 +82,7 @@ def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str):
 
     return (batters, pitchers)
 
-def generateFangraphsAPIUrl(fangraphsPlayerPage, apiTemplate, year=''):
+def generateFangraphsAPIUrl(fangraphsPlayerPage: str, apiTemplate: str, year: str = '') -> str:
     r = requests.get(fangraphsPlayerPage)
         
     parsed_url = urllib.parse.urlparse(r.url)
@@ -99,16 +100,16 @@ def generateFangraphsAPIUrl(fangraphsPlayerPage, apiTemplate, year=''):
     
     return fangraphsSplitsLastYearAPIPage
 
-def generateFangraphsSplitsAPIUrl(fangraphsPlayerPage, year):
+def generateFangraphsSplitsAPIUrl(fangraphsPlayerPage: str, year: str) -> str:
     apiTemplate = "https://www.fangraphs.com/api/players/splits?playerid={player_id}&split=&season={year}"
     return generateFangraphsAPIUrl(fangraphsPlayerPage, apiTemplate, year)
 
-def generateFangraphsStatsAPIUrl(fangraphsPlayerPage):
+def generateFangraphsStatsAPIUrl(fangraphsPlayerPage: str) -> str:
     apiTemplate = "https://www.fangraphs.com/api/players/stats?playerid={player_id}"
     return generateFangraphsAPIUrl(fangraphsPlayerPage, apiTemplate)
 
 
-def buildBatterDataObj(row, predictionType: PredictionType, projectionType: ProjectionType):
+def buildBatterDataObj(row, predictionType: PredictionType, projectionType: ProjectionType) -> BatterData:
     batterData = BatterData(predictionType, projectionType)
 
     batterData.g = int(row["G"])
@@ -125,7 +126,7 @@ def buildBatterDataObj(row, predictionType: PredictionType, projectionType: Proj
 
     return batterData
 
-def buildPitcherDataObj(row, predictionType: PredictionType, projectionType: ProjectionType):
+def buildPitcherDataObj(row, predictionType: PredictionType, projectionType: ProjectionType) -> PitcherData:
     pitcherData = PitcherData(predictionType, projectionType)
 
     # AB does not exist, so generate from H/AVG
@@ -145,7 +146,7 @@ def buildPitcherDataObj(row, predictionType: PredictionType, projectionType: Pro
 
     return pitcherData
 
-def getFangraphsPlayerPageFromOttoneuPlayerPage(ottoPage):
+def getFangraphsPlayerPageFromOttoneuPlayerPage(ottoPage: str) -> str:
     ottoneuPlayerPage = requests.get(ottoPage)
     soup = BeautifulSoup(ottoneuPlayerPage.text, 'lxml')
     
@@ -153,7 +154,7 @@ def getFangraphsPlayerPageFromOttoneuPlayerPage(ottoPage):
     return link[0].attrs.get('href', '')
 
 
-def getBatterData(batters, predictionYear):
+def getBatterData(batters: dict[BatterData], predictionYear: str) -> None:
     for batterId in batters:
         batter: Batter = batters[batterId]
         
@@ -190,7 +191,7 @@ def getBatterData(batters, predictionYear):
 
         #break # temp so we don't go through every batter
 
-def getPitcherData(pitchers: dict[str, Pitcher], predictionYear: str):
+def getPitcherData(pitchers: dict[str, Pitcher], predictionYear: str) -> None:
     for pitcherId in pitchers:
         pitcher: Pitcher = pitchers[pitcherId]
         
@@ -232,7 +233,7 @@ def getPitcherData(pitchers: dict[str, Pitcher], predictionYear: str):
         pitcher.pOverall.x2b = pitcher.pvsL.x2b + pitcher.pvsR.x2b
         pitcher.pOverall.x3b = pitcher.pvsL.x3b + pitcher.pvsR.x3b
 
-def getAverageForData(batterData, pitcherData, averageABs, stat):
+def getAverageForData(batterData: BatterData, pitcherData: PitcherData, averageABs: float, stat: str) -> float:
     if getattr(batterData, "ab") != 0 and getattr(pitcherData, "ab") != 0:
         return averageABs*((getattr(batterData, stat)/getattr(batterData, "ab"))+(getattr(pitcherData, stat)/getattr(pitcherData, "ab")))/2.0
     elif getattr(batterData, "ab") != 0:
@@ -265,7 +266,7 @@ def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: Pitcher
     calculatedPredictionData.sb = getAverageForData(batterData, PitcherData(PredictionType.Empty, ProjectionType.Empty), calculatedPredictionData.ab, "sb")
     calculatedPredictionData.cs = getAverageForData(batterData, PitcherData(PredictionType.Empty, ProjectionType.Empty), calculatedPredictionData.ab, "cs")
 
-    # Pull this from the ottoneu page at some point
+    # TODO: Pull this from the ottoneu page at some point
     calculatedPredictionData.totalPoints = -1.0*calculatedPredictionData.ab
     calculatedPredictionData.totalPoints += 5.6*calculatedPredictionData.h
     calculatedPredictionData.totalPoints += 2.9*calculatedPredictionData.x2b
@@ -278,7 +279,7 @@ def calculateBatterPredictionPoints(batterData: BatterData, pitcherData: Pitcher
 
     return calculatedPredictionData
 
-def chooseBatterPrediction(options):
+def chooseBatterPrediction(options) -> BatterData:
     for option in options:
         if option is not None and getattr(option, "ab") > 0:
             return option
@@ -345,12 +346,12 @@ def createBatterPredictions(batters: dict[str, Batter], preferredPredictionType:
 
         #break # temp so we don't go through every batter
 
-def printBatterPredictions(batters):
+def printBatterPredictions(batters) -> None:
     for batterId in batters:
         batter: Batter = batters[batterId]
         print(f"{batter.name}: {batter.predictionData.totalPoints}, {batter.predictionData.batterPredictionType}, {batter.predictionData.pitcherPredictionType}")
 
-def getArgs():
+def getArgs() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Generate an ottoneu lineup')
     parser.add_argument('--league', dest='league', type=str, nargs='?', default='1212',
                         help='the league number in Ottoneu')
