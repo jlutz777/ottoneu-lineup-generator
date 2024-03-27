@@ -15,6 +15,15 @@ thisYear = now.year
 thisDay = now.day
 lastYear = thisYear-1
 
+def isOnIL(additionalPlayerInfoElem) -> bool:
+    ilDataElem = additionalPlayerInfoElem.find('span', {'class', 'tinytext morered'})
+
+    if ilDataElem is not None and ilDataElem.get_text() != '':
+        return True
+
+    return False
+
+
 # TODO: Get all of the pitchers eventually as well
 def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str) -> tuple[dict[str, BatterData], dict[str, PitcherData]]:
     data = requests.get(f'https://ottoneu.fangraphs.com/{leagueNumber}/setlineups?team={teamNumber}&date={lineupDate}')
@@ -34,6 +43,7 @@ def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str) -> tupl
             batter.name = playerLink.get_text()
             additionalPlayerInfo = playerInfo.find('span', {'class': 'lineup-player-bio'})
             parts = additionalPlayerInfo.find('span', {'class', 'strong tinytext'}).get_text().split('\xa0')
+            batter.isInjured = isOnIL(additionalPlayerInfo)
 
             # If the player is in the minor leagues, it adds a space and the league
             [team, positions, handedness] = parts
@@ -168,6 +178,7 @@ def getBatterData(batters: dict[BatterData], predictionYear: str) -> None:
         r = requests.get(batter.fangraphsStatsYearAPIPage)
         statsData = r.json()
 
+        # TODO: Next step - get MILB, projection, this year's, and career data
         for dataPoint in statsData["data"]:
             # Type 0 seems to be regular season
             if dataPoint.get("aseason", "") == predictionYear and dataPoint.get("type", -1) == 0 and dataPoint.get("AbbLevel", "") == "MLB":
@@ -349,7 +360,8 @@ def createBatterPredictions(batters: dict[str, Batter], preferredPredictionType:
 def printBatterPredictions(batters) -> None:
     for batterId in batters:
         batter: Batter = batters[batterId]
-        print(f"{batter.name}: {batter.predictionData.totalPoints}, {batter.predictionData.batterPredictionType}, {batter.predictionData.pitcherPredictionType}")
+        roundedPoints = round(batter.predictionData.totalPoints, 2)
+        print(f"{batter.name} {"(injured)" if batter.isInjured else ""}: {roundedPoints}, {batter.predictionData.batterPredictionType}, {batter.predictionData.pitcherPredictionType}")
 
 def getArgs() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Generate an ottoneu lineup')

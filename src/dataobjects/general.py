@@ -14,6 +14,7 @@ class Player:
         self.fangraphsStatsYearAPIPage = ''
         self.homeOrAway = ''
         self.league = '' # MLB is empty
+        self.isInjured = False
 
     def __repr__(self):
         return pformat(vars(self), indent=4, width=1)
