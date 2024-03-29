@@ -61,6 +61,19 @@ def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str) -> tupl
             # If the game is finished, the link is on the game score instead of the profile page, so don't recurse
             pitcherLink = opponentInfo.find('a', recursive=False)
 
+            lineupGameInfoElem = opponentInfo.find('span', {'class': 'lineup-game-info'})
+            if lineupGameInfoElem is not None:
+                if lineupGameInfoElem.get_text() == "---":
+                    # There is no game for this player
+                    batter.lineupPosition = "Not starting"
+                else:
+                    startingIndicatorElem = lineupGameInfoElem.find('span', { 'class': 'sr-only' })
+                    if startingIndicatorElem is not None:
+                        # There is a game. If they are in the lineup it'll say "Batting X".
+                        # If they are not in the lineup, it'll say "Not starting"
+                        batter.lineupPosition = startingIndicatorElem.get_text()
+
+            # Before the lineup is set, the opposing pitcher exists
             if pitcherLink is not None:
                 pitcherId  = 'player_' + pitcherLink.attrs.get('href', '').split('/')[3]
                 pitcher = None
@@ -87,7 +100,7 @@ def parseLineupPage(leagueNumber: str, teamNumber: str, lineupDate: str) -> tupl
                 else:
                     pitcher = pitchers[pitcherId]
                     batter.opposingPitcher = pitcher
-            
+
             batters[batter.id] = batter
 
     return (batters, pitchers)
@@ -320,8 +333,10 @@ def createBatterPredictions(batters: dict[str, Batter], preferredPredictionType:
         else:
             predictionType = preferredPredictionType
         
-        # TODO: Determine if a batter's team is not playing or if the batter is not in the lineup, give them zero
-        if predictionType == PredictionType.Projection or predictionType == PredictionType.Minors:
+        if batter.lineupPosition == "Not starting":
+            bData = BatterData(PredictionType.Empty, ProjectionType.Empty)
+            pData = PitcherData(PredictionType.Empty, ProjectionType.Empty)
+        elif predictionType == PredictionType.Projection or predictionType == PredictionType.Minors:
             # TODO: Replace with projection or minor league stats
             bData = BatterData(PredictionType.Empty, ProjectionType.Empty)
             pData = PitcherData(PredictionType.Empty, ProjectionType.Empty)
@@ -361,7 +376,7 @@ def printBatterPredictions(batters) -> None:
     for batterId in batters:
         batter: Batter = batters[batterId]
         roundedPoints = round(batter.predictionData.totalPoints, 2)
-        print(f"{batter.name} {"(injured)" if batter.isInjured else ""}: {roundedPoints}, {batter.predictionData.batterPredictionType}, {batter.predictionData.pitcherPredictionType}")
+        print(f"{batter.name} {"(injured)" if batter.isInjured else ""}: {roundedPoints}, {batter.predictionData.batterPredictionType}, {batter.predictionData.pitcherPredictionType}, batting: {batter.lineupPosition}")
 
 def getArgs() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description='Generate an ottoneu lineup')

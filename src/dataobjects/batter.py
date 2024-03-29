@@ -26,6 +26,7 @@ class Batter(Player):
         super().__init__()
         self.positions = ''
         self.opposingPitcher: Player = None
+        self.lineupPosition = 'Unknown'
         self.bOverall: BatterData = None
         self.bvsL: BatterData = None
         self.bvsR: BatterData = None
